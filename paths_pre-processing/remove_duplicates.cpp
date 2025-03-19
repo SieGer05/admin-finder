@@ -5,6 +5,7 @@
 #include <iterator>
 
 int main() {
+   // You can put here your file's path
    std::ifstream inputFile("admin_path.txt");
    
    if (!inputFile) {
