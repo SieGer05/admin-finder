@@ -90,11 +90,9 @@ g++ remove_duplicates.cpp -o dedup
 ---
 ## ⚠️ Disclaimer
 
-> This tool is intended for **educational purposes only**. 
- 
-> The author is **not responsible** for any misuse or illegal activities performed using this script.  
-
-> Always have **proper authorization** before scanning any website.
+This tool is intended for **educational purposes only**. 
+The author is **not responsible** for any misuse or illegal activities performed using this script.  
+Always have **proper authorization** before scanning any website.
 
 ---
 ## **✨ Credits**
