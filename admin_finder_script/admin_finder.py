@@ -3,8 +3,23 @@ import requests
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from colorama import init, Fore, Style
+import os
 
-init(autoreset=True)  
+init(autoreset=True)
+
+print_lock = threading.Lock()
+
+found_something = []
+
+def clear_screen():
+   if os.name == 'nt':  
+      os.system('cls')
+   else:  
+      os.system('clear')
+
+def safe_print(message):
+   with print_lock:
+      print(message)
 
 def print_line(char, times, color):
    print(f'{getattr(Fore, color.upper())}{char * times}{Style.RESET_ALL}')
@@ -20,134 +35,130 @@ def print_banner():
    """
    print(Fore.RED + ascii_art)
    print(f"\t\t\t\t{Fore.YELLOW}👻 Made by SieGer{Style.RESET_ALL}")
-
    print(f"\n\t{Fore.RED}!! I am not responsible for your actions. Use at your own risk.!!{Style.RESET_ALL}\n")
    print_line('-', 74, 'yellow')
 
 def parse_args():
-   parser = argparse.ArgumentParser(description="A script to scan for admin panels and EAR vulnerabilities on the target website.")
-   
-   parser.add_argument("-t", "--target-url", 
-                     help="The target URL to scan (e.g., http://example.com). This argument is required.", 
-                     required=True)
-   
-   parser.add_argument("-p", "--path-prefix", 
-                     help="A custom path prefix to append to the target URL for scanning (optional).",
-                     default="")
-   
-   parser.add_argument("-f", "--file-type", 
-                     help="The file types to scan (html, php, asp). Default is 'html'.", 
-                     choices=["html", "php", "asp"], 
-                     default="html")
-   
-   parser.add_argument("-m", "--multi-threading", 
-                     help="Enable multi-threading to speed up the scan (optional).", 
-                     action="store_true")
-   
-   parser.add_argument("-w", "--wordlist", 
-                     help="Path to a custom wordlist file for scanning (optional). Default is 'admin_path.txt'.", 
-                     default="admin_path.txt")
-   
-   parser.add_argument("-v", "--verbose", 
-                     help="Enable verbose output to display detailed scan progress and results.", 
-                     action="store_true")
+   parser = argparse.ArgumentParser(description="Scan for admin panels and EAR vulnerabilities.")
+
+   parser.add_argument("-t", "--target-url", required=True,
+                     help="Target URL to scan (e.g., http://example.com)")
+   parser.add_argument("-p", "--path-prefix", default="",
+                     help="Path prefix to append to the URL (optional)")
+   parser.add_argument("-f", "--file-type", choices=["html", "php", "asp"], default="html",
+                     help="File type for filtering paths")
+   parser.add_argument("-m", "--multi-threading", action="store_true",
+                     help="Enable multi-threaded scanning")
+   parser.add_argument("-w", "--wordlist", default="admin_path.txt",
+                     help="Custom wordlist file (default: admin_path.txt)")
+   parser.add_argument("-v", "--verbose", action="store_true",
+                     help="Enable verbose output")
+   parser.add_argument("-o", "--output", help="Output file to save found results")
 
    return parser.parse_args()
 
+def save_results_to_file(results, filename):
+   try:
+      with open(filename, "w") as f:
+         for result in results:
+            f.write(result + "\n")
+      safe_print(f"\n{Fore.CYAN}[✔]{Style.RESET_ALL} Results saved to {filename}")
+   except Exception as e:
+      safe_print(f"{Fore.RED}[x]{Style.RESET_ALL} Failed to save results: {e}")
+
 def normalize_target_url(url, prefix=""):
    if url.startswith("https://"):
-      url = url.replace("https://", "").rstrip('/')
       protocol = "https://"
+      url = url.replace("https://", "").rstrip('/')
    elif url.startswith("http://"):
-      url = url.replace("http://", "").rstrip('/')
       protocol = "http://"
+      url = url.replace("http://", "").rstrip('/')
    else:
-      raise ValueError("The URL must start with 'http://' or 'https://'. Please include the protocol.")
-   
-   return f'{protocol}{url}{prefix}'
+      raise ValueError("URL must start with 'http://' or 'https://'")
+   return f"{protocol}{url}{prefix}"
 
 def check_robots(target):
    try:
       response = requests.get(f"{target}/robots.txt")
       if response.status_code == 200:
-         print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Robots.txt found. Check for interesting entries.")
-         print(response.text)
+         safe_print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Robots.txt found. Check for interesting entries.")
+         safe_print(response.text)
       else:
-         print(f"  {Fore.RED}[-]{Style.RESET_ALL} Robots.txt not found or inaccessible.")
+         safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Robots.txt not found or inaccessible.")
    except requests.exceptions.RequestException:
-      print(f"  {Fore.RED}[-]{Style.RESET_ALL} Failed to fetch robots.txt.")
+      safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Failed to fetch robots.txt.")
 
 def read_paths(wordlist_file, file_type):
-   file_type_extensions = {
-      "html": [".html", ".htm", ".xhtml", ".jsp", ".cgi", ".cfm", ".brf", ".brfbrf"],  
+   extensions = {
+      "html": [".html", ".htm", ".xhtml", ".jsp", ".cgi", ".cfm", ".brf", ".brfbrf"],
       "php": [".php", ".php3", ".php4", ".phtml", ".phps"],
-      "asp": [".asp", ".aspx", ".cer", ".asa"],
-      "js": [".js"],  
-      "cgi": [".cgi"],
-      "cfm": [".cfm"],
-      "brf": [".brf"],
-      "brfbrf": [".brfbrf"],
+      "asp": [".asp", ".aspx", ".cer", ".asa"]
    }
 
-   allowed_extensions = file_type_extensions.get(file_type, [])
-
-   paths = set() 
+   allowed_exts = extensions.get(file_type, [])
+   paths = set()
 
    try:
       with open(wordlist_file, 'r') as file:
          for path in file:
                path = path.strip()
-               
-               if any(path.endswith(ext) for ext in allowed_extensions):
+               if any(path.endswith(ext) for ext in allowed_exts):
                   paths.add(path)
-
    except IOError:
-      print(f"{Fore.RED}[-]{Style.RESET_ALL} Wordlist not found!")
+      safe_print(f"{Fore.RED}[-]{Style.RESET_ALL} Wordlist not found!")
       exit(1)
 
    return list(paths)
 
-def scan_path(target, path):
+def scan_path(target, path, verbose):
    url = f"{target}/{path}"
    try:
       response = requests.get(url)
+
       if response.status_code == 200:
-         print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Admin panel found: {url}")
-      elif response.status_code == 404:
-         print(f"  {Fore.RED}[-]{Style.RESET_ALL} Not found: {url}")
+         safe_print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Admin panel found: {url}")
+         found_something.append(url)
       elif response.status_code == 302:
-         print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Potential EAR vulnerability found: {url}")
-      else:
-         print(f"  {Fore.RED}[-]{Style.RESET_ALL} Error {response.status_code}: {url}")
+         safe_print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Potential EAR vulnerability found: {url}")
+         found_something.append(url)
+      elif verbose:
+         if response.status_code == 404:
+            safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Not found: {url}")
+         else:
+            safe_print(f"  {Fore.YELLOW}[!]{Style.RESET_ALL} Status {response.status_code}: {url}")
+
    except requests.exceptions.RequestException:
-      print(f"  {Fore.RED}[-]{Style.RESET_ALL} Error with {url}")
+      if verbose:
+         safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Error with {url}")
 
-def scan_with_threads(target, paths):
+def scan_with_threads(target, paths, verbose):
    with ThreadPoolExecutor(max_workers=10) as executor:
-      executor.map(lambda path: scan_path(target, path), paths)
+      executor.map(lambda path: scan_path(target, path, verbose), paths)
 
-def scan_without_threads(target, paths):
+def scan_without_threads(target, paths, verbose):
    for path in paths:
-      scan_path(target, path)
+      scan_path(target, path, verbose)
 
 def main():
    print_banner()
-
    args = parse_args()
 
-   # Change 'args.url' to 'args.target_url'
    target = normalize_target_url(args.target_url, args.path_prefix)
-   
    check_robots(target)
-   
+
    paths = read_paths(args.wordlist, args.file_type)
-   
+
    if args.multi_threading:
-      print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in fast mode with multi-threading...")
-      scan_with_threads(target, paths)
+      safe_print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in fast mode with multi-threading...\n")
+      scan_with_threads(target, paths, args.verbose)
    else:
-      print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in normal mode without multi-threading...")
-      scan_without_threads(target, paths)
+      safe_print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in normal mode without multi-threading...\n")
+      scan_without_threads(target, paths, args.verbose)
+
+   if not args.verbose and not found_something:
+      print(f"{Fore.YELLOW}[!]{Style.RESET_ALL} Nothing found.")
+   elif found_something and args.output:
+      save_results_to_file(found_something, args.output)
 
 if __name__ == "__main__":
    main()
