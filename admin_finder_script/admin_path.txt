@@ -609,7 +609,6 @@ admin2.asp
 admin2.brf
 admin2.cfm
 admin2.cgi
-admin2.js
 admin2.php
 admin2/
 admin2/index.asp
