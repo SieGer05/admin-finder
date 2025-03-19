@@ -1,6 +1,7 @@
 import argparse
 import requests
 import threading
+import random
 from concurrent.futures import ThreadPoolExecutor
 from colorama import init, Fore, Style
 import os
@@ -8,8 +9,22 @@ import os
 init(autoreset=True)
 
 print_lock = threading.Lock()
-
 found_something = []
+
+FAKE_USER_AGENTS = [
+   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+   "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.5993.80 Mobile Safari/537.36",
+   "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
+   "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko",
+   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36",
+   "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.3 Mobile/15E148 Safari/604.1"
+]
+
+def clear_screen():
+   if os.name == 'nt':  
+      os.system('cls')
+   else:  
+      os.system('clear')
 
 def clear_screen():
    if os.name == 'nt':  
@@ -54,6 +69,8 @@ def parse_args():
    parser.add_argument("-v", "--verbose", action="store_true",
                      help="Enable verbose output")
    parser.add_argument("-o", "--output", help="Output file to save found results")
+   parser.add_argument("--random-agent", action="store_true",
+                     help="Use random User-Agent headers for each request")
 
    return parser.parse_args()
 
@@ -61,7 +78,7 @@ def save_results_to_file(results, filename):
    try:
       with open(filename, "w") as f:
          for result in results:
-            f.write(result + "\n")
+               f.write(result + "\n")
       safe_print(f"\n{Fore.CYAN}[✔]{Style.RESET_ALL} Results saved to {filename}")
    except Exception as e:
       safe_print(f"{Fore.RED}[x]{Style.RESET_ALL} Failed to save results: {e}")
@@ -77,9 +94,12 @@ def normalize_target_url(url, prefix=""):
       raise ValueError("URL must start with 'http://' or 'https://'")
    return f"{protocol}{url}{prefix}"
 
-def check_robots(target):
+def check_robots(target, use_random_agent):
+   headers = {
+      "User-Agent": random.choice(FAKE_USER_AGENTS) if use_random_agent else "Mozilla/5.0 (AdminScanner)"
+   }
    try:
-      response = requests.get(f"{target}/robots.txt")
+      response = requests.get(f"{target}/robots.txt", headers=headers, timeout=5)
       if response.status_code == 200:
          safe_print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Robots.txt found. Check for interesting entries.")
          safe_print(response.text)
@@ -110,10 +130,13 @@ def read_paths(wordlist_file, file_type):
 
    return list(paths)
 
-def scan_path(target, path, verbose):
+def scan_path(target, path, verbose, use_random_agent):
    url = f"{target}/{path}"
+   headers = {
+      "User-Agent": random.choice(FAKE_USER_AGENTS) if use_random_agent else "Mozilla/5.0 (AdminScanner)"
+   }
    try:
-      response = requests.get(url)
+      response = requests.get(url, headers=headers, timeout=5)
 
       if response.status_code == 200:
          safe_print(f"  {Fore.GREEN}[+]{Style.RESET_ALL} Admin panel found: {url}")
@@ -123,37 +146,38 @@ def scan_path(target, path, verbose):
          found_something.append(url)
       elif verbose:
          if response.status_code == 404:
-            safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Not found: {url}")
+               safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Not found: {url}")
          else:
-            safe_print(f"  {Fore.YELLOW}[!]{Style.RESET_ALL} Status {response.status_code}: {url}")
+               safe_print(f"  {Fore.YELLOW}[!]{Style.RESET_ALL} Status {response.status_code}: {url}")
 
    except requests.exceptions.RequestException:
       if verbose:
          safe_print(f"  {Fore.RED}[-]{Style.RESET_ALL} Error with {url}")
 
-def scan_with_threads(target, paths, verbose):
+def scan_with_threads(target, paths, verbose, use_random_agent):
    with ThreadPoolExecutor(max_workers=10) as executor:
-      executor.map(lambda path: scan_path(target, path, verbose), paths)
+      executor.map(lambda path: scan_path(target, path, verbose, use_random_agent), paths)
 
-def scan_without_threads(target, paths, verbose):
+def scan_without_threads(target, paths, verbose, use_random_agent):
    for path in paths:
-      scan_path(target, path, verbose)
+      scan_path(target, path, verbose, use_random_agent)
 
 def main():
+   clear_screen()
    print_banner()
    args = parse_args()
 
    target = normalize_target_url(args.target_url, args.path_prefix)
-   check_robots(target)
+   check_robots(target, args.random_agent)
 
    paths = read_paths(args.wordlist, args.file_type)
 
    if args.multi_threading:
       safe_print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in fast mode with multi-threading...\n")
-      scan_with_threads(target, paths, args.verbose)
+      scan_with_threads(target, paths, args.verbose, args.random_agent)
    else:
       safe_print(f"{Fore.BLUE}[+]{Style.RESET_ALL} Running in normal mode without multi-threading...\n")
-      scan_without_threads(target, paths, args.verbose)
+      scan_without_threads(target, paths, args.verbose, args.random_agent)
 
    if not args.verbose and not found_something:
       print(f"{Fore.YELLOW}[!]{Style.RESET_ALL} Nothing found.")
