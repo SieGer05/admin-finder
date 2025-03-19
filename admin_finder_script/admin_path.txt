@@ -192,7 +192,7 @@
 /admin_login.asp
 /admin_login.html
 /admin_login.php
-/admin_login.php]
+/admin_login.php
 /admin_main.html
 /admin_tool/
 /adminarea/
